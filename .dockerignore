@@ -1,0 +1,12 @@
+# Files Docker should NOT copy into the build (smaller, faster builds; no local junk in the image)
+target/
+logs/
+.git/
+.gitignore
+.gitattributes
+.idea/
+.vscode/
+*.iml
+HELP.md
+Dockerfile
+docker-compose.yml

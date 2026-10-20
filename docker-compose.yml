@@ -1,0 +1,49 @@
+# Runs the app together with its own PostgreSQL database.
+#   docker compose up --build    build the app image and start both (Ctrl+C to stop)
+#   docker compose down          remove the containers (database data is kept)
+#   docker compose down -v       remove the containers AND the database data
+#
+# The password comes from the POSTGRES_PASSWORD environment variable.
+# The default below is for local development only - never use it anywhere real.
+
+services:
+
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: shop
+      POSTGRES_USER: shop
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-shop_local_dev}
+    # Reachable from your Mac on 5433 (5432 is already used by the Homebrew PostgreSQL)
+    ports:
+      - "5433:5432"
+    # Keep the database files in a Docker volume, so data survives restarts
+    volumes:
+      - shop-db-data:/var/lib/postgresql/data
+    # "Ready" = PostgreSQL accepts connections; the app waits for this before starting
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U shop -d shop"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  app:
+    build: .
+    image: shop-api
+    depends_on:
+      db:
+        condition: service_healthy
+    # These override the matching settings in application.properties
+    # ("db" is the name of the database container above)
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://db:5432/shop
+      SPRING_DATASOURCE_USERNAME: shop
+      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:-shop_local_dev}
+    ports:
+      - "8080:8080"
+    # Log files written inside the container appear in ./logs on your Mac
+    volumes:
+      - ./logs:/app/logs
+
+volumes:
+  shop-db-data:
