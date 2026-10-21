@@ -39,6 +39,8 @@ services:
       SPRING_DATASOURCE_URL: jdbc:postgresql://db:5432/shop
       SPRING_DATASOURCE_USERNAME: shop
       SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:-shop_local_dev}
+      # "kafka:29092" is Kafka's address for other containers
+      SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:29092
     ports:
       - "8080:8080"
     # Log files written inside the container appear in ./logs on your Mac

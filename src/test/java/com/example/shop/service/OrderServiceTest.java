@@ -38,6 +38,7 @@ import java.util.Optional;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -105,6 +106,43 @@ class OrderServiceTest {
         assertThat(result.items().get(1).lineTotal()).isEqualByComparingTo("29.97");
         assertThat(result.items().get(1).productType()).isEqualTo(ProductType.COSMETICS);
         assertThat(result.items().get(1).quantity()).isEqualTo(3);
+    }
+
+    @Test
+    void createOrder_savesOrderPlacedEventForTheSavedOrder() {
+        Customer bob = buildCustomer(6L);
+        when(customerRepository.findByIdAndDeletedFalse(6L)).thenReturn(Optional.of(bob));
+        when(productRepository.findById(1L))
+                .thenReturn(Optional.of(buildProduct(1L, "Laptop", ProductType.ELECTRONICS, "2019.00")));
+        when(orderRepository.save(any(Order.class))).thenAnswer(call -> {
+            Order saved = call.getArgument(0);
+            ReflectionTestUtils.setField(saved, "id", 7L);
+            return saved;
+        });
+
+        orderService.createOrder(new OrderCreateRequest(6L, List.of(new OrderItemRequest(1L, 2))));
+
+        // The outbox gets the order AFTER it was saved (so it already has its ID)
+        ArgumentCaptor<Order> eventOrder = ArgumentCaptor.forClass(Order.class);
+        verify(outboxService).saveOrderPlacedEvent(eventOrder.capture());
+        assertThat(eventOrder.getValue().getId()).isEqualTo(7L);
+        assertThat(eventOrder.getValue().getCustomer()).isSameAs(bob);
+    }
+
+    @Test
+    void createOrder_whenSavingEventFails_failsTheWholeOrder() {
+        when(customerRepository.findByIdAndDeletedFalse(6L)).thenReturn(Optional.of(buildCustomer(6L)));
+        when(productRepository.findById(1L))
+                .thenReturn(Optional.of(buildProduct(1L, "Laptop", ProductType.ELECTRONICS, "2019.00")));
+        when(orderRepository.save(any(Order.class))).thenAnswer(call -> call.getArgument(0));
+        doThrow(new IllegalStateException("outbox insert failed"))
+                .when(outboxService).saveOrderPlacedEvent(any(Order.class));
+
+        // The error reaches createOrder, so Spring rolls back its transaction: no order without its event
+        assertThatThrownBy(() -> orderService.createOrder(
+                new OrderCreateRequest(6L, List.of(new OrderItemRequest(1L, 2)))))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("outbox insert failed");
     }
 
     @Test
