@@ -39,17 +39,20 @@ public class OrderService {
     private final CustomerRepository customerRepository;
     private final ProductRepository productRepository;
     private final CurrencyClient currencyClient;
+    private final OutboxService outboxService;
 
     public OrderService(OrderRepository orderRepository,
                         OrderItemRepository orderItemRepository,
                         CustomerRepository customerRepository,
                         ProductRepository productRepository,
-                        CurrencyClient currencyClient) {
+                        CurrencyClient currencyClient,
+                        OutboxService outboxService) {
         this.orderRepository = orderRepository;
         this.orderItemRepository = orderItemRepository;
         this.customerRepository = customerRepository;
         this.productRepository = productRepository;
         this.currencyClient = currencyClient;
+        this.outboxService = outboxService;
     }
 
     // Places a new PENDING order. Prices are copied from the products right now,
@@ -87,7 +90,12 @@ public class OrderService {
 
         order.setTotalAmount(totalAmount);
         // Saving the order also saves its items (cascade = ALL in Order.items)
-        return OrderResponse.from(orderRepository.save(order));
+        Order savedOrder = orderRepository.save(order);
+
+        // Same transaction: if saving the event fails, the order is rolled back too (and the other way round)
+        outboxService.saveOrderPlacedEvent(savedOrder);
+
+        return OrderResponse.from(savedOrder);
     }
 
     @Transactional(readOnly = true, timeoutString = "${shop.timeout.read-seconds}")

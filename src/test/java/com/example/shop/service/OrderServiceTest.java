@@ -58,6 +58,9 @@ class OrderServiceTest {
     @Mock
     private ProductRepository productRepository;
 
+    @Mock
+    private OutboxService outboxService;
+
     @InjectMocks
     private OrderService orderService;
 
