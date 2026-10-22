@@ -2,9 +2,6 @@ HELP.md
 target/
 logs/
 
-# Claude's private working notes - stays on this Mac only
-MASTER_PLAN.md
-CLAUDE.md
 .mvn/wrapper/maven-wrapper.jar
 !**/src/main/**/target/
 !**/src/test/**/target/
