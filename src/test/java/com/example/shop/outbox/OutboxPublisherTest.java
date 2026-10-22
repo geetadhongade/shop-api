@@ -6,6 +6,8 @@ import com.example.shop.entity.OutboxEventType;
 import com.example.shop.repository.OutboxEventRepository;
 import org.apache.kafka.clients.admin.NewTopic;
 import org.apache.kafka.clients.producer.ProducerRecord;
+import org.apache.kafka.clients.producer.RecordMetadata;
+import org.apache.kafka.common.TopicPartition;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -204,8 +206,10 @@ class OutboxPublisherTest {
     // ---------- helpers ----------
 
     private void kafkaAccepts() {
+        // Pretend Kafka stored the message in partition 1 at offset 7
+        RecordMetadata stored = new RecordMetadata(new TopicPartition("order-events", 1), 7, 0, 0, 0, 0);
         when(kafkaTemplate.send(any(ProducerRecord.class)))
-                .thenReturn(CompletableFuture.completedFuture((SendResult<String, String>) null));
+                .thenReturn(CompletableFuture.completedFuture(new SendResult<String, String>(null, stored)));
     }
 
     private void kafkaFails(String message) {

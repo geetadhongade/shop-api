@@ -6,6 +6,7 @@ import com.example.shop.logging.RequestIdFilter;
 import com.example.shop.repository.OutboxEventRepository;
 import org.apache.kafka.clients.admin.NewTopic;
 import org.apache.kafka.clients.producer.ProducerRecord;
+import org.apache.kafka.clients.producer.RecordMetadata;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.slf4j.MDC;
@@ -13,6 +14,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.kafka.core.KafkaAdmin;
 import org.springframework.kafka.core.KafkaTemplate;
+import org.springframework.kafka.support.SendResult;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -85,11 +87,12 @@ public class OutboxPublisher {
             }
             try {
                 ensureTopicExists();
-                send(event);
+                RecordMetadata stored = send(event);
                 event.setStatus(OutboxEventStatus.PUBLISHED);
                 event.setPublishedAt(OffsetDateTime.now());
                 event.setLastError(null);
-                log.info("Published {} event {} for order {}", event.getEventType(), event.getEventId(), event.getOrderId());
+                log.info("Published {} event {} for order {} (partition {}, offset {})",
+                        event.getEventType(), event.getEventId(), event.getOrderId(), stored.partition(), stored.offset());
             } catch (Exception ex) {
                 event.setAttempts(event.getAttempts() + 1);
                 event.setLastError(shorten(ex.getClass().getSimpleName() + ": " + ex.getMessage()));
@@ -103,8 +106,8 @@ public class OutboxPublisher {
         }
     }
 
-    // Sends one event and waits until Kafka confirms it is stored
-    private void send(OutboxEvent event) throws Exception {
+    // Sends one event, waits until Kafka confirms it is stored, and returns where it was stored (partition + offset)
+    private RecordMetadata send(OutboxEvent event) throws Exception {
         ProducerRecord<String, String> record = new ProducerRecord<>(
                 orderEventsTopic.name(),
                 // Key = order ID: all events of one order go to the same partition, so they stay in order
@@ -117,7 +120,8 @@ public class OutboxPublisher {
             record.headers().add("reqId", event.getRequestId().getBytes(StandardCharsets.UTF_8));
         }
 
-        kafkaTemplate.send(record).get(sendTimeoutSeconds, TimeUnit.SECONDS);
+        SendResult<String, String> result = kafkaTemplate.send(record).get(sendTimeoutSeconds, TimeUnit.SECONDS);
+        return result.getRecordMetadata();
     }
 
     // Creates the topic if it doesn't exist yet (does nothing if it does)
