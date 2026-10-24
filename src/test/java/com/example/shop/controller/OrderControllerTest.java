@@ -5,12 +5,15 @@ import com.example.shop.dto.OrderItemRequest;
 import com.example.shop.dto.OrderItemResponse;
 import com.example.shop.dto.OrderResponse;
 import com.example.shop.dto.OrderSummaryResponse;
+import com.example.shop.dto.OrderTotalResponse;
 import com.example.shop.entity.OrderStatus;
 import com.example.shop.entity.ProductType;
 import com.example.shop.exception.BusinessRuleException;
 import com.example.shop.exception.InvalidRequestException;
 import com.example.shop.exception.ResourceNotFoundException;
 import com.example.shop.service.OrderService;
+import io.github.resilience4j.circuitbreaker.CallNotPermittedException;
+import io.github.resilience4j.circuitbreaker.CircuitBreaker;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
@@ -23,6 +26,7 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.util.List;
 
@@ -117,6 +121,24 @@ class OrderControllerTest {
                 .andExpect(jsonPath("$.status").value("CANCELLED"));
     }
 
+    @Test
+    void getOrderTotal_inEur_returnsConvertedTotal() throws Exception {
+        // Made-up rate: 4038.00 USD x 0.89087 = 3597.33 EUR
+        OrderTotalResponse total = new OrderTotalResponse(7L, new BigDecimal("4038.00"), "USD", "EUR",
+                new BigDecimal("0.89087"), new BigDecimal("3597.33"), LocalDate.parse("2026-10-19"));
+        when(orderService.getOrderTotal(7L, "EUR")).thenReturn(total);
+
+        mockMvc.perform(get("/api/orders/7/total").param("currency", "EUR"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.orderId").value(7))
+                .andExpect(jsonPath("$.totalAmount").value(4038.00))
+                .andExpect(jsonPath("$.baseCurrency").value("USD"))
+                .andExpect(jsonPath("$.currency").value("EUR"))
+                .andExpect(jsonPath("$.rate").value(0.89087))
+                .andExpect(jsonPath("$.convertedTotal").value(3597.33))
+                .andExpect(jsonPath("$.rateDate").value("2026-10-19"));
+    }
+
     // ---------- 400 Bad Request ----------
 
     @Test
@@ -124,6 +146,15 @@ class OrderControllerTest {
         mockMvc.perform(get("/api/orders"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.message").value("Parameter 'customerId' is required"));
+
+        verifyNoInteractions(orderService);
+    }
+
+    @Test
+    void getOrderTotal_withoutCurrency_returns400() throws Exception {
+        mockMvc.perform(get("/api/orders/7/total"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("Parameter 'currency' is required"));
 
         verifyNoInteractions(orderService);
     }
@@ -181,6 +212,22 @@ class OrderControllerTest {
         mockMvc.perform(post("/api/orders/7/cancel"))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.message").value("Order 7 is PAID; only PENDING orders can be cancelled"));
+    }
+
+    // ---------- 503 Service Unavailable ----------
+
+    @Test
+    void getOrderTotal_whenCurrencyServiceIsDown_returns503() throws Exception {
+        // The circuit breaker is open (Frankfurter kept failing), so the service gives up right away
+        CircuitBreaker openCircuitBreaker = CircuitBreaker.ofDefaults("currency");
+        openCircuitBreaker.transitionToOpenState();
+        CallNotPermittedException circuitOpen =
+                CallNotPermittedException.createCallNotPermittedException(openCircuitBreaker);
+        when(orderService.getOrderTotal(7L, "EUR")).thenThrow(circuitOpen);
+
+        mockMvc.perform(get("/api/orders/7/total").param("currency", "EUR"))
+                .andExpect(status().isServiceUnavailable())
+                .andExpect(jsonPath("$.message").value("Currency service is unavailable, please try again later"));
     }
 
     // ---------- helpers to build fake data ----------

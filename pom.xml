@@ -97,6 +97,13 @@
 			<artifactId>spring-boot-starter-webmvc-test</artifactId>
 			<scope>test</scope>
 		</dependency>
+		<!-- Fake HTTP server for tests: stands in for Frankfurter so we can make it fail on purpose -->
+		<dependency>
+			<groupId>org.wiremock</groupId>
+			<artifactId>wiremock-standalone</artifactId>
+			<version>3.13.1</version>
+			<scope>test</scope>
+		</dependency>
 	</dependencies>
 
 	<build>
