@@ -73,7 +73,7 @@ POSTGRES_PASSWORD=my-secret docker compose up -d
 Requirements: Java 21 and a PostgreSQL database called `shop`.
 
 1. Create the database: `createdb shop`
-2. Set your database user and password (the defaults in `application.properties` are for the author's machine):
+2. Set your database user and password (the defaults in `application-dev.properties` are for the author's machine):
    ```bash
    export SPRING_DATASOURCE_USERNAME=your_user
    export SPRING_DATASOURCE_PASSWORD=your_password
@@ -82,6 +82,40 @@ Requirements: Java 21 and a PostgreSQL database called `shop`.
    ```bash
    ./mvnw spring-boot:run
    ```
+
+## Environments (profiles)
+
+Settings shared by every environment are in `src/main/resources/application.properties`.
+What differs per environment is in one extra file per profile, read on top of it:
+
+| Profile | File | Database and Kafka come from |
+|---|---|---|
+| `dev` (used when no profile is chosen) | `application-dev.properties` | The file itself (`localhost`) |
+| `staging` | `application-staging.properties` | Environment variables |
+| `prod` | `application-prod.properties` | Environment variables |
+
+Docker Compose also runs with `dev`, and replaces the database and Kafka addresses with
+its own environment variables (`SPRING_DATASOURCE_URL`, `SPRING_KAFKA_BOOTSTRAP_SERVERS`, ...).
+
+Choose a profile when starting the app:
+
+```bash
+./mvnw spring-boot:run -Dspring-boot.run.profiles=staging   # with Maven
+java -jar shop-api.jar --spring.profiles.active=prod
+SPRING_PROFILES_ACTIVE=prod                                 # or as an environment variable
+```
+
+`staging` and `prod` need these environment variables. If one is missing, the app
+fails to start. No real address or password is ever stored in this repository.
+
+| Variable | Example |
+|---|---|
+| `DB_HOST` | `shop-db.internal` |
+| `DB_PORT` | `5432` |
+| `DB_NAME` | `shop` |
+| `DB_USERNAME` | `shop` |
+| `DB_PASSWORD` | (secret) |
+| `KAFKA_BOOTSTRAP_SERVERS` | `kafka-1:9092,kafka-2:9092,kafka-3:9092` |
 
 ## API
 
@@ -221,6 +255,9 @@ src/main/java/com/example/shop
 ├── config       beans (password encoder, HTTP client)
 └── logging      request ID filter and timing aspect
 src/main/resources
-├── application.properties
+├── application.properties           settings shared by every environment
+├── application-dev.properties       your machine (localhost database and Kafka)
+├── application-staging.properties   staging: database and Kafka from environment variables
+├── application-prod.properties      production: same, from environment variables
 └── db/migration   Flyway SQL scripts (V1–V7)
 ```
