@@ -1,10 +1,13 @@
 package com.example.shop.service;
 
+import com.example.shop.client.CurrencyClient;
+import com.example.shop.client.ExchangeRate;
 import com.example.shop.dto.OrderCreateRequest;
 import com.example.shop.dto.OrderItemRequest;
 import com.example.shop.dto.OrderItemResponse;
 import com.example.shop.dto.OrderResponse;
 import com.example.shop.dto.OrderSummaryResponse;
+import com.example.shop.dto.OrderTotalResponse;
 import com.example.shop.entity.Customer;
 import com.example.shop.entity.Order;
 import com.example.shop.entity.OrderItem;
@@ -31,6 +34,7 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Optional;
@@ -41,6 +45,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 // Unit test: all repositories are fakes (mocks), so no database is used
@@ -61,6 +66,10 @@ class OrderServiceTest {
 
     @Mock
     private OutboxService outboxService;
+
+    // Fake Frankfurter client: each test decides which exchange rate it returns
+    @Mock
+    private CurrencyClient currencyClient;
 
     @InjectMocks
     private OrderService orderService;
@@ -258,6 +267,68 @@ class OrderServiceTest {
                 .isInstanceOf(ResourceNotFoundException.class)
                 .hasMessage("Order 99 not found");
         verify(orderItemRepository, never()).findAllByOrderId(any());
+    }
+
+    // ---------- total in another currency ----------
+
+    @Test
+    void getOrderTotal_convertsTotalWithTodaysRate() {
+        when(orderRepository.findById(7L)).thenReturn(Optional.of(buildOrder(7L, OrderStatus.PENDING)));
+        when(currencyClient.getRateFromBase("EUR")).thenReturn(
+                new ExchangeRate("USD", "EUR", new BigDecimal("0.89087"), LocalDate.parse("2026-10-19")));
+
+        OrderTotalResponse result = orderService.getOrderTotal(7L, "EUR");
+
+        assertThat(result.orderId()).isEqualTo(7L);
+        assertThat(result.totalAmount()).isEqualByComparingTo("4038.00");
+        assertThat(result.baseCurrency()).isEqualTo("USD");
+        assertThat(result.currency()).isEqualTo("EUR");
+        assertThat(result.rate()).isEqualByComparingTo("0.89087");
+        // 4038.00 x 0.89087 = 3597.33306 -> 3597.33
+        assertThat(result.convertedTotal()).isEqualTo(new BigDecimal("3597.33"));
+        assertThat(result.rateDate()).isEqualTo(LocalDate.parse("2026-10-19"));
+    }
+
+    @Test
+    void getOrderTotal_withLowercaseCurrency_asksForUppercase() {
+        when(orderRepository.findById(7L)).thenReturn(Optional.of(buildOrder(7L, OrderStatus.PENDING)));
+        when(currencyClient.getRateFromBase("EUR")).thenReturn(
+                new ExchangeRate("USD", "EUR", new BigDecimal("0.89087"), LocalDate.parse("2026-10-19")));
+
+        OrderTotalResponse result = orderService.getOrderTotal(7L, "eur");
+
+        // Frankfurter only knows uppercase codes, so "eur" must be sent as "EUR"
+        verify(currencyClient).getRateFromBase("EUR");
+        assertThat(result.currency()).isEqualTo("EUR");
+    }
+
+    @Test
+    void getOrderTotal_withBadCurrencyCode_throwsInvalidRequestAndNeverCallsFrankfurter() {
+        // Too long, too short with a digit, and missing
+        assertThatThrownBy(() -> orderService.getOrderTotal(7L, "EURO"))
+                .isInstanceOf(InvalidRequestException.class)
+                .hasMessage("currency must be a 3-letter code, e.g. EUR");
+        assertThatThrownBy(() -> orderService.getOrderTotal(7L, "E1"))
+                .isInstanceOf(InvalidRequestException.class)
+                .hasMessage("currency must be a 3-letter code, e.g. EUR");
+        assertThatThrownBy(() -> orderService.getOrderTotal(7L, null))
+                .isInstanceOf(InvalidRequestException.class)
+                .hasMessage("currency must be a 3-letter code, e.g. EUR");
+
+        // Junk is stopped before it ever reaches Frankfurter
+        verifyNoInteractions(currencyClient);
+    }
+
+    @Test
+    void getOrderTotal_whenOrderMissing_throwsNotFoundAndNeverCallsFrankfurter() {
+        when(orderRepository.findById(99L)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> orderService.getOrderTotal(99L, "EUR"))
+                .isInstanceOf(ResourceNotFoundException.class)
+                .hasMessage("Order 99 not found");
+
+        // No order, so no point asking Frankfurter for a rate
+        verifyNoInteractions(currencyClient);
     }
 
     // ---------- cancel ----------
